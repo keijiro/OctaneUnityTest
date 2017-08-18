@@ -1,0 +1,16 @@
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+
+/Extra/*.obj
+/Extra/backup
+/Library/
+/Temp/
+
+log.html
+log.txt
+
+/Assets/Plugins/Octane
+/Assets/Plugins/Octane.meta
+/Render/*.png
