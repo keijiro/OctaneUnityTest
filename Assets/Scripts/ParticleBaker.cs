@@ -18,6 +18,11 @@ public class ParticleBaker : MonoBehaviour
 
     #region MonoBehaviour functions
 
+    void OnDisable()
+    {
+        ReleaseRenderers();
+    }
+
     void OnDestroy()
     {
         ReleaseRenderers();
@@ -95,7 +100,7 @@ public class ParticleBaker : MonoBehaviour
         // Bake the particles.
         for (var i = 0; i < count; i++)
         {
-            BakeParticle(i);
+            BakeParticle(i, mainModule.startRotation3D);
 
             // Flush the current vertex array into a temporary renderer when:
             // - This particle is the last one.
@@ -151,13 +156,15 @@ public class ParticleBaker : MonoBehaviour
     List<Vector2> _uv0_out = new List<Vector2>();
     List<int> _idx_out = new List<int>();
 
-    void BakeParticle(int index)
+    void BakeParticle(int index, bool useEuler)
     {
         var p = _particleBuffer[index];
 
         var mtx = Matrix4x4.TRS(
             p.position,
-            Quaternion.AngleAxis(p.rotation, p.axisOfRotation),
+            useEuler ? 
+                Quaternion.Euler(p.rotation3D) :
+                Quaternion.AngleAxis(p.rotation, p.axisOfRotation),
             Vector3.one * p.GetCurrentSize(_target)
         );
 
