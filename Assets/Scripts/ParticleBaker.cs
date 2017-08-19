@@ -2,46 +2,62 @@ using System.Collections.Generic;
 using UnityEngine;
 
 [ExecuteInEditMode]
-[RequireComponent(typeof(MeshRenderer))]
 public class ParticleBaker : MonoBehaviour
 {
+    #region Editable variables
+
     [SerializeField] ParticleSystem _target;
 
+    #endregion
+
+    #region Private variables
+
     Mesh _mesh;
-    ParticleSystem.Particle[] _buffer;
+    TempRenderer _renderer;
     float _lastUpdateTime = -1;
 
-    void LateUpdate()
-    {
-        if (_target == null) return;
+    #endregion
 
-        if (_lastUpdateTime != _target.time) UpdateMesh();
+    #region MonoBehaviour functions
 
-        var filter = GetComponent<MeshFilter>();
-        if (filter == null)
-        {
-            filter = gameObject.AddComponent<MeshFilter>();
-            filter.hideFlags = HideFlags.NotEditable;
-        }
-
-        filter.sharedMesh = _mesh;
-    }
-
-    void UpdateMesh()
+    void OnDestroy()
     {
         if (_mesh != null)
+        {
             if (Application.isPlaying)
                 Destroy(_mesh);
             else
                 DestroyImmediate(_mesh);
+        }
 
-        _mesh = new Mesh();
-        _mesh.hideFlags = HideFlags.HideAndDontSave;
-
-        BakeMesh();
-
-        _lastUpdateTime = _target.time;
+        if (_renderer) _renderer.Release();
     }
+
+    void LateUpdate()
+    {
+        // Do nothing if no target is given.
+        if (_target == null) return;
+
+        // Allocate a temporary renderer if not yet.
+        if (_renderer == null) _renderer = TempRenderer.Allocate();
+
+        // Update the mesh object if the simulation time is updated.
+        if (_lastUpdateTime != _target.time) UpdateMesh();
+
+        // Set the mesh/material to the remporary renderer.
+        var pr = _target.GetComponent<ParticleSystemRenderer>();
+        _renderer.SetRenderProperties(_mesh, pr.sharedMaterial);
+        _renderer.SetTransform(transform);
+    }
+
+    #endregion
+
+    #region Editable fields
+
+    // Arrays/lists used to bake particles.
+    // These arrays/lists are reused between frames to reduce memory pressure.
+
+    ParticleSystem.Particle[] _particleBuffer;
 
     List<Vector3> _vtx_in = new List<Vector3>();
     List<Vector3> _nrm_in = new List<Vector3>();
@@ -55,15 +71,40 @@ public class ParticleBaker : MonoBehaviour
     List<Vector2> _uv0_out = new List<Vector2>();
     List<int> _idx_out = new List<int>();
 
-    void BakeMesh()
+    // Update the mesh object.
+    // Destroy the old mesh, then create a new mesh and bake into it.
+    void UpdateMesh()
+    {
+        if (_mesh != null)
+        {
+            if (Application.isPlaying)
+                Destroy(_mesh);
+            else
+                DestroyImmediate(_mesh);
+        }
+
+        _mesh = new Mesh();
+        _mesh.hideFlags = HideFlags.HideAndDontSave;
+
+        BakeIntoMesh();
+
+        _lastUpdateTime = _target.time;
+    }
+
+    // Bake the target particle system into the mesh object.
+    void BakeIntoMesh()
     {
         var main = _target.main;
+
+        if (_particleBuffer == null ||
+            _particleBuffer.Length != main.maxParticles)
+        {
+            _particleBuffer = new ParticleSystem.Particle[main.maxParticles];
+        }
+
+        var count = _target.GetParticles(_particleBuffer);
+
         var renderer = _target.GetComponent<ParticleSystemRenderer>();
-
-        if (_buffer == null || _buffer.Length != main.maxParticles)
-            _buffer = new ParticleSystem.Particle[main.maxParticles];
-
-        var count = _target.GetParticles(_buffer);
         var template = renderer.mesh;
 
         template.GetVertices(_vtx_in);
@@ -80,7 +121,7 @@ public class ParticleBaker : MonoBehaviour
 
         for (var i = 0; i < count; i++)
         {
-            var p = _buffer[i];
+            var p = _particleBuffer[i];
 
             var mtx = Matrix4x4.TRS(
                 p.position,
@@ -107,7 +148,9 @@ public class ParticleBaker : MonoBehaviour
         _mesh.SetVertices(_vtx_out);
         _mesh.SetNormals(_nrm_out);
         _mesh.SetTangents(_tan_out);
-        if (_uv0_out.Count > 0) _mesh.SetUVs(0, _uv0_out);
+        _mesh.SetUVs(0, _uv0_out);
         _mesh.SetTriangles(_idx_out, 0, true);
     }
+
+    #endregion
 }
