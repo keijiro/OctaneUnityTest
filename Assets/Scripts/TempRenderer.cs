@@ -104,15 +104,11 @@ public class TempRenderer : MonoBehaviour
     {
         if (Application.isPlaying)
         {
-            Destroy(_meshFilter);
-            Destroy(_meshRenderer);
             Destroy(_defaultMesh);
             Destroy(_defaultMaterial);
         }
         else
         {
-            DestroyImmediate(_meshFilter);
-            DestroyImmediate(_meshRenderer);
             DestroyImmediate(_defaultMesh);
             DestroyImmediate(_defaultMaterial);
         }
