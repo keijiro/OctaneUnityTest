@@ -12,8 +12,6 @@ public class ParticleBaker : MonoBehaviour
 
     #region Private variables
 
-    Mesh _mesh;
-    TempRenderer _renderer;
     float _lastUpdateTime = -1;
 
     #endregion
@@ -22,37 +20,119 @@ public class ParticleBaker : MonoBehaviour
 
     void OnDestroy()
     {
-        if (_mesh != null)
-        {
-            if (Application.isPlaying)
-                Destroy(_mesh);
-            else
-                DestroyImmediate(_mesh);
-        }
-
-        if (_renderer) _renderer.Release();
+        ReleaseRenderers();
     }
 
     void LateUpdate()
     {
-        // Do nothing if no target is given.
-        if (_target == null) return;
-
-        // Allocate a temporary renderer if not yet.
-        if (_renderer == null) _renderer = TempRenderer.Allocate();
-
-        // Update the mesh object if the simulation time is updated.
-        if (_lastUpdateTime != _target.time) UpdateMesh();
-
-        // Set the mesh/material to the remporary renderer.
-        var pr = _target.GetComponent<ParticleSystemRenderer>();
-        _renderer.SetRenderProperties(_mesh, pr.sharedMaterial);
-        _renderer.SetTransform(transform);
+        if (_target != null)
+        {
+            // Rebuild the temporary renderers if the simulation time is
+            // updated from the last time.
+            if (_lastUpdateTime != _target.time)
+            {
+                ReleaseRenderers();
+                BuildRenderers();
+                _lastUpdateTime = _target.time;
+            }
+        }
+        else
+        {
+            // No target is given: destroy temporary renderers.
+            ReleaseRenderers();
+        }
     }
 
     #endregion
 
-    #region Editable fields
+    #region Temporary renderer wrangling
+
+    Stack<TempRenderer> _renderers = new Stack<TempRenderer>();
+
+    void ReleaseRenderers()
+    {
+        while (_renderers.Count > 0)
+        {
+            var r = _renderers.Pop();
+
+            if (Application.isPlaying)
+                Destroy(r.mesh);
+            else
+                DestroyImmediate(r.mesh);
+
+            r.Release();
+        }
+    }
+
+    void BuildRenderers()
+    {
+        // Update the particle array.
+        var mainModule = _target.main;
+        var maxCount = mainModule.maxParticles;
+
+        if (_particleBuffer == null || _particleBuffer.Length != maxCount)
+            _particleBuffer = new ParticleSystem.Particle[maxCount];
+
+        var count = _target.GetParticles(_particleBuffer);
+
+        // Update the input vertex array.
+        var rendererModule = _target.GetComponent<ParticleSystemRenderer>();
+        var template = rendererModule.mesh;
+
+        template.GetVertices(_vtx_in);
+        template.GetNormals(_nrm_in);
+        template.GetTangents(_tan_in);
+        template.GetUVs(0, _uv0_in);
+        template.GetIndices(_idx_in, 0);
+
+        // Clear the output vertex array.
+        _vtx_out.Clear();
+        _nrm_out.Clear();
+        _tan_out.Clear();
+        _uv0_out.Clear();
+        _idx_out.Clear();
+
+        // Bake the particles.
+        for (var i = 0; i < count; i++)
+        {
+            BakeParticle(i);
+
+            // Flush the current vertex array into a temporary renderer when:
+            // - This particle is the last one.
+            // - Vertex count is going to go over the 64k limit.
+            if (i == count - 1 || _vtx_out.Count + _vtx_in.Count > 65535)
+            {
+                // Build a mesh with the output vertex buffer.
+                var mesh = new Mesh();
+                mesh.hideFlags = HideFlags.HideAndDontSave;
+
+                mesh.SetVertices(_vtx_out);
+                mesh.SetNormals(_nrm_out);
+                mesh.SetTangents(_tan_out);
+                mesh.SetUVs(0, _uv0_out);
+                mesh.SetTriangles(_idx_out, 0, true);
+
+                // Allocate a temporary renderer and give the mesh.
+                var renderer = TempRenderer.Allocate();
+                renderer.SetTransform(transform);
+                renderer.mesh = mesh;
+                renderer.material = rendererModule.sharedMaterial;
+
+                _renderers.Push(renderer);
+
+                // Clear the output vertex array.
+                _vtx_out.Clear();
+                _nrm_out.Clear();
+                _tan_out.Clear();
+                _uv0_out.Clear();
+                _idx_out.Clear();
+            }
+        }
+    }
+
+    #endregion
+
+    #region Mesh baker
 
     // Arrays/lists used to bake particles.
     // These arrays/lists are reused between frames to reduce memory pressure.
@@ -71,85 +151,31 @@ public class ParticleBaker : MonoBehaviour
     List<Vector2> _uv0_out = new List<Vector2>();
     List<int> _idx_out = new List<int>();
 
-    // Update the mesh object.
-    // Destroy the old mesh, then create a new mesh and bake into it.
-    void UpdateMesh()
+    void BakeParticle(int index)
     {
-        if (_mesh != null)
+        var p = _particleBuffer[index];
+
+        var mtx = Matrix4x4.TRS(
+            p.position,
+            Quaternion.AngleAxis(p.rotation, p.axisOfRotation),
+            Vector3.one * p.GetCurrentSize(_target)
+        );
+
+        var vi0 = _vtx_out.Count;
+
+        foreach (var v in _vtx_in) _vtx_out.Add(mtx.MultiplyPoint(v));
+
+        foreach (var n in _nrm_in) _nrm_out.Add(mtx.MultiplyVector(n));
+
+        foreach (var t in _tan_in)
         {
-            if (Application.isPlaying)
-                Destroy(_mesh);
-            else
-                DestroyImmediate(_mesh);
+            var mt = mtx.MultiplyVector(t);
+            _tan_out.Add(new Vector4(mt.x, mt.y, mt.z, t.w));
         }
 
-        _mesh = new Mesh();
-        _mesh.hideFlags = HideFlags.HideAndDontSave;
+        _uv0_out.AddRange(_uv0_in);
 
-        BakeIntoMesh();
-
-        _lastUpdateTime = _target.time;
-    }
-
-    // Bake the target particle system into the mesh object.
-    void BakeIntoMesh()
-    {
-        var main = _target.main;
-
-        if (_particleBuffer == null ||
-            _particleBuffer.Length != main.maxParticles)
-        {
-            _particleBuffer = new ParticleSystem.Particle[main.maxParticles];
-        }
-
-        var count = _target.GetParticles(_particleBuffer);
-
-        var renderer = _target.GetComponent<ParticleSystemRenderer>();
-        var template = renderer.mesh;
-
-        template.GetVertices(_vtx_in);
-        template.GetNormals(_nrm_in);
-        template.GetTangents(_tan_in);
-        template.GetUVs(0, _uv0_in);
-        template.GetIndices(_idx_in, 0);
-
-        _vtx_out.Clear();
-        _nrm_out.Clear();
-        _tan_out.Clear();
-        _uv0_out.Clear();
-        _idx_out.Clear();
-
-        for (var i = 0; i < count; i++)
-        {
-            var p = _particleBuffer[i];
-
-            var mtx = Matrix4x4.TRS(
-                p.position,
-                Quaternion.AngleAxis(p.rotation, p.axisOfRotation),
-                Vector3.one * p.GetCurrentSize(_target)
-            );
-
-            var vi0 = _vtx_out.Count;
-
-            foreach (var v in _vtx_in) _vtx_out.Add(mtx.MultiplyPoint(v));
-            foreach (var n in _nrm_in) _nrm_out.Add(mtx.MultiplyVector(n));
-
-            foreach (var t in _tan_in)
-            {
-                var mt = mtx.MultiplyVector(t);
-                _tan_out.Add(new Vector4(mt.x, mt.y, mt.z, t.w));
-            }
-
-            _uv0_out.AddRange(_uv0_in);
-
-            foreach (var idx in _idx_in) _idx_out.Add(idx + vi0);
-        }
-
-        _mesh.SetVertices(_vtx_out);
-        _mesh.SetNormals(_nrm_out);
-        _mesh.SetTangents(_tan_out);
-        _mesh.SetUVs(0, _uv0_out);
-        _mesh.SetTriangles(_idx_out, 0, true);
+        foreach (var idx in _idx_in) _idx_out.Add(idx + vi0);
     }
 
     #endregion

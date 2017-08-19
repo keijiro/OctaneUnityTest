@@ -16,8 +16,8 @@ public class TempRenderer : MonoBehaviour
 
     public void Release()
     {
-        _meshFilter.sharedMesh = null;
-        _meshRenderer.sharedMaterial = null;
+        if (_meshFilter != null) _meshFilter.sharedMesh = null;
+        if (_meshRenderer != null) _meshRenderer.sharedMaterial = null;
         _available = true;
     }
 
@@ -25,17 +25,21 @@ public class TempRenderer : MonoBehaviour
 
     #region Public methods
 
+    public Mesh mesh {
+        get { return _mesh; }
+        set { _meshFilter.sharedMesh = _mesh = value; }
+    }
+
+    public Material material {
+        get { return _material; }
+        set { _meshRenderer.sharedMaterial = _material = value; }
+    }
+
     public void SetTransform(Transform tr)
     {
         transform.position = tr.position;
         transform.rotation = tr.rotation;
         transform.localScale = tr.localScale;
-    }
-
-    public void SetRenderProperties(Mesh mesh, Material material)
-    {
-        _meshFilter.sharedMesh = mesh;
-        _meshRenderer.sharedMaterial = material;
     }
 
     #endregion
@@ -49,6 +53,10 @@ public class TempRenderer : MonoBehaviour
     // Default empty assets.
     Mesh _defaultMesh;
     Material _defaultMaterial;
+
+    // Given assets.
+    Mesh _mesh;
+    Material _material;
 
     // Is this renderer available to use?
     bool _available;
