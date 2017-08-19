@@ -11,7 +11,7 @@ public class ParticleBaker : MonoBehaviour
     ParticleSystem.Particle[] _buffer;
     float _lastUpdateTime = -1;
 
-    void Update()
+    void LateUpdate()
     {
         if (_target == null) return;
 
@@ -84,7 +84,7 @@ public class ParticleBaker : MonoBehaviour
 
             var mtx = Matrix4x4.TRS(
                 p.position,
-                Quaternion.Euler(p.rotation3D),
+                Quaternion.AngleAxis(p.rotation, p.axisOfRotation),
                 Vector3.one * p.GetCurrentSize(_target)
             );
 
